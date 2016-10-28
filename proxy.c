@@ -81,7 +81,9 @@ void plog(int priority, const char *format, ...);
 
 int server_sock, client_sock, remote_sock, remote_port = 0;
 int connections_processed = 0;
-char *remote_host, *cmd_in, *cmd_out;
+char *cmd_in, *cmd_out;
+char remote_host[256];
+char **argvp;
 bool foreground = FALSE;
 bool use_syslog = FALSE;
 
@@ -91,6 +93,7 @@ int main(int argc, char *argv[]) {
     pid_t pid;
 
     local_port = parse_options(argc, argv);
+    argvp = argv;
 
     if (local_port < 0) {
         printf("Syntax: %s -l local_port -h remote_host -p remote_port [-i \"input parser\"] [-o \"output parser\"] [-f (stay in foreground)] [-s (use syslog)]\n", argv[0]);
@@ -139,7 +142,7 @@ int parse_options(int argc, char *argv[]) {
                 local_port = atoi(optarg);
                 break;
             case 'h':
-                remote_host = optarg;
+                strncpy(remote_host, optarg, sizeof(remote_host));
                 break;
             case 'p':
                 remote_port = atoi(optarg);
@@ -159,7 +162,7 @@ int parse_options(int argc, char *argv[]) {
         }
     }
 
-    if (local_port && remote_host && remote_port) {
+    if (local_port && remote_port) {
         return local_port;
     } else {
         return SYNTAX_ERROR;
@@ -243,6 +246,7 @@ int set_reuseaddr(int sock)
 void server_loop() {
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
+    char new_addr[INET_ADDRSTRLEN];
 
 #ifdef USE_SYSTEMD
     sd_notify(0, "READY=1\n");
@@ -254,6 +258,11 @@ void server_loop() {
         set_reuseaddr(client_sock);
         if (fork() == 0) { // handle client connection in a separate process
             close(server_sock);
+            inet_ntop(AF_INET, &(client_addr.sin_addr), new_addr, addrlen);
+            memset(argvp[0], 0, _POSIX_PATH_MAX);
+            snprintf(argvp[0], _POSIX_PATH_MAX,
+                " proxy-connection[%s]", new_addr);
+            argvp[1] = 0;
             handle_client(client_sock, client_addr);
             exit(0);
         } else
