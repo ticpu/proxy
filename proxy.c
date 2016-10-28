@@ -75,6 +75,7 @@ void handle_client(int client_sock, struct sockaddr_in client_addr);
 void forward_data(int source_sock, int destination_sock);
 void forward_data_ext(int source_sock, int destination_sock, char *cmd);
 int create_connection();
+int set_reuseaddr(int sock);
 int parse_options(int argc, char *argv[]);
 void plog(int priority, const char *format, ...);
 
@@ -167,14 +168,14 @@ int parse_options(int argc, char *argv[]) {
 
 /* Create server socket */
 int create_socket(int port) {
-    int server_sock, optval = 1;
+    int server_sock;
     struct sockaddr_in server_addr;
 
     if ((server_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return SERVER_SOCKET_ERROR;
     }
 
-    if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+    if (set_reuseaddr(server_sock) < 0) {
         return SERVER_SETSOCKOPT_ERROR;
     }
 
@@ -231,6 +232,13 @@ void sigterm_handler(int signal) {
     exit(0);
 }
 
+int set_reuseaddr(int sock)
+{
+    int optval = 1;
+
+    return setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+}
+
 /* Main server loop */
 void server_loop() {
     struct sockaddr_in client_addr;
@@ -243,6 +251,7 @@ void server_loop() {
     while (TRUE) {
         update_connection_count();
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
+        set_reuseaddr(client_sock);
         if (fork() == 0) { // handle client connection in a separate process
             close(server_sock);
             handle_client(client_sock, client_addr);
