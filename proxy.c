@@ -74,7 +74,7 @@ void server_loop();
 void handle_client(int client_sock, struct sockaddr_in client_addr);
 void forward_data(int source_sock, int destination_sock);
 void forward_data_ext(int source_sock, int destination_sock, char *cmd);
-int create_connection();
+int create_connection(char *conn_host, int conn_port);
 int set_reuseaddr(int sock);
 int parse_options(int argc, char *argv[]);
 void plog(int priority, const char *format, ...);
@@ -275,8 +275,34 @@ void server_loop() {
 /* Handle client connection */
 void handle_client(int client_sock, struct sockaddr_in client_addr)
 {
-    if ((remote_sock = create_connection()) < 0) {
-        plog(LOG_ERR, "Cannot connect to host: %m");
+    const char to_find[] = "support.test.ca";
+    char buffer[BUF_SIZE];
+    char *conn_addr;
+    int n;
+
+    n = recv(client_sock, buffer, BUF_SIZE, MSG_PEEK);
+
+    if (n > 0) {
+        if (memmem(buffer, sizeof(buffer), to_find, sizeof(to_find)) == NULL) {
+            plog(LOG_INFO, "New connection from console.");
+            conn_addr = remote_host;
+        } else {
+            if (buffer[0x2b] == 0x20) {
+                conn_addr = remote_host;
+                plog(LOG_INFO, "New connection from mobile device.");
+            } else {
+                conn_addr = "127.0.0.1";
+                plog(LOG_INFO, "New connection from browser.");
+            }
+        }
+    } else {
+        //perror("Connection aborted.");
+        goto cleanup;
+    }
+
+    if ((remote_sock = create_connection(conn_addr, remote_port)) < 0) {
+        plog(LOG_WARNING, "Cannot connect to host %s on port %u. %s",
+            conn_addr, remote_port, strerror(errno));
         goto cleanup;
     }
 
@@ -386,7 +412,7 @@ void forward_data_ext(int source_sock, int destination_sock, char *cmd) {
 }
 
 /* Create client connection */
-int create_connection() {
+int create_connection(char *conn_host, int conn_port) {
     struct sockaddr_in server_addr;
     struct hostent *server;
     int sock;
@@ -395,7 +421,7 @@ int create_connection() {
         return CLIENT_SOCKET_ERROR;
     }
 
-    if ((server = gethostbyname(remote_host)) == NULL) {
+    if ((server = gethostbyname(conn_host)) == NULL) {
         errno = EFAULT;
         return CLIENT_RESOLVE_ERROR;
     }
@@ -403,7 +429,7 @@ int create_connection() {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);
-    server_addr.sin_port = htons(remote_port);
+    server_addr.sin_port = htons(conn_port);
 
     if (connect(sock, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         return CLIENT_CONNECT_ERROR;
